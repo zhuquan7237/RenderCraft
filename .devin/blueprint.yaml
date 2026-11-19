@@ -1,0 +1,60 @@
+# One-time setup (e.g., install system tools, global CLIs).
+initialize:
+  - name: Install Node.js 22
+    run: |
+      sudo mkdir -p /opt/node
+      curl -fsSL https://nodejs.org/dist/latest-v22.x/ | grep -o 'node-v22[^"]*linux-x64.tar.xz' | head -1 > /tmp/node-tarball
+      curl -fsSL "https://nodejs.org/dist/latest-v22.x/$(cat /tmp/node-tarball)" | sudo tar -xJ -C /opt/node --strip-components=1
+      sudo ln -sf /opt/node/bin/node /opt/node/bin/npm /opt/node/bin/npx /usr/local/bin/
+      node -v
+  - name: Install JDK 21
+    run: |
+      sudo apt-get update -qq
+      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openjdk-21-jdk-headless
+      echo "JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64" >> $ENVRC
+  - name: Install Android SDK (platform 36, build-tools 35)
+    run: |
+      export ANDROID_HOME=$HOME/android-sdk JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+      mkdir -p $ANDROID_HOME/cmdline-tools
+      curl -fsSLo /tmp/clt.zip https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip
+      rm -rf /tmp/clt $ANDROID_HOME/cmdline-tools/latest && unzip -qo /tmp/clt.zip -d /tmp/clt
+      mv /tmp/clt/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
+      yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null || true
+      $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;35.0.0" > /dev/null
+      echo "ANDROID_HOME=$ANDROID_HOME" >> $ENVRC
+      echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $ENVRC
+  - name: Gradle Maven Central mirror (repo.maven.apache.org returns 429 from cloud IPs)
+    run: |
+      mkdir -p ~/.gradle/init.d
+      cat > ~/.gradle/init.d/maven-central-mirror.gradle <<'GRADLE'
+      def mirror = { RepositoryHandler repos ->
+          repos.maven { url 'https://maven-central.storage-download.googleapis.com/maven2/' }
+      }
+      settingsEvaluated { s ->
+          s.pluginManagement.repositories { mirror(delegate) }
+      }
+      allprojects {
+          buildscript.repositories { mirror(delegate) }
+          repositories { mirror(delegate) }
+      }
+      GRADLE
+# Install project dependencies (runs during builds, surfaced to agent at session start).
+maintenance: |
+  npm install --legacy-peer-deps --no-save
+knowledge:
+  - name: lint
+    contents: |
+      npm run lint   # tsc --noEmit; currently fails on a missing `Bell` import in src/components/TopAppBar.tsx (pre-existing)
+  - name: test
+    contents: |
+      No test suite; verify with `npm run build` and the dev server.
+  - name: build
+    contents: |
+      npm run build   # web bundle to dist/
+      npx cap sync android && (cd android && ./gradlew assembleDebug)   # APK at android/app/build/outputs/apk/debug/app-debug.apk
+  - name: startup
+    contents: |
+      npm run dev   # Vite on http://localhost:3000
+  - name: notes
+    contents: |
+      React 19 + Vite + Tailwind + Capacitor 8 Android app. GEMINI_API_KEY/APP_URL in .env.example are AI Studio placeholders, not needed to build or run.
